@@ -158,10 +158,11 @@
 #include <Wire.h>
 #include <heltec.h>
 #include <RH_RF95.h>
-// #include <lora/LoRa.h>
+#include <RHMesh.h>
 #include <HT_SSD1306Wire.h>
-
-
+#include <Adafruit_I2CDevice.h>
+#include <Adafruit_Sensor.h>
+#include <esp_task_wdt.h>
 // ----------------------------------------------------------------------------------------------
 
 
@@ -169,6 +170,17 @@
 // Define Variable ------------------------------------------------------------------------------
 #define LORA_SS_PIN 18
 #define LORA_DIO0_PIN 26
+#define SENDING_MODE 0      /*Mode สำหรับการส่งข้อความไปยัง Node อื่นๆหรือ Gateway*/
+#define RECEIVING_MODE 1    /*Node จะทำการรอรับข้อความจาก Node อื่นๆ*/
+     /* Topology Network (จำนวนของ Mesh ทั้งหมดที่มีอยู่ใน Network)*/
+#define NODE1_ADDRESS 1
+#define NODE2_ADDRESS 2
+#define NODE3_ADDRESS 3 // ทำเป็น Gateway จำลองรอ Gateway เสร็จก่อน
+const uint8_t SelfAddress = NODE1_ADDRESS;
+const uint8_t GatewayAddress = NODE3_ADDRESS;
+std::string PACKAGE_SND = String("This is Package from " + String(SelfAddress)).c_str(); 
+std::string PACKAGE_RCV ; /*เก็บข้อความที่รับมาจาก Node อื่นๆ*/
+
 static SSD1306Wire Screen_display(0x3c, 
                                   500000,
                                   SDA_OLED,
@@ -176,8 +188,8 @@ static SSD1306Wire Screen_display(0x3c,
                                   GEOMETRY_128_64,
                                   RST_OLED);
 RH_RF95 RF95_Sender(LORA_SS_PIN, LORA_DIO0_PIN);
-
-
+// RHMesh Mesh_Manager()
+int counter = 1;
 // ----------------------------------------------------------------------------------------------
 
 
@@ -190,18 +202,21 @@ RH_RF95 RF95_Sender(LORA_SS_PIN, LORA_DIO0_PIN);
 
 // Setup Function -------------------------------------------------------------------------------
 void setup(){
-    Serial.begin(9600);
     Heltec.begin(true, /*DisplayEnable*/
                  false, /*LoRaEnable*/ /*ต้องปิดเพราะไม่งั้นจะไม่ conflix กันกับ RH_RF95.h */
                  true,  /*SerialEnable*/
                  true, /*PABOOST*/
                  923.2E6 /*Band*/);
+    Serial.begin(9600);
     
     /*RF95 setting*/
     RF95_Sender.init();
     RF95_Sender.setFrequency(923.2);
-    RF95_Sender.setSpreadingFactor(7);
-    RF95_Sender.setSignalBandwidth(125);
+    RF95_Sender.setSpreadingFactor(12);
+    RF95_Sender.setSignalBandwidth(125E3);
+    RF95_Sender.setTxPower(23); //ค่อยมาคำนวนอีกที
+    
+
 
     /*ตั้งค่าหน้าจอ OLED*/
     Screen_display.init();
@@ -213,5 +228,24 @@ void setup(){
 
 
 // Main Function --------------------------------------------------------------------------------
+void loop(){
+    // Serial.println("Broadcasting...");
+    // Serial.println("Counter " + String(counter));
+    // Screen_display.clear();
+    // Screen_display.drawString(0, 0, "Broadcasting...");
+    // Screen_display.drawString(0, 10, "Counter " + String(counter));
 
-// ----------------------------------------------------------------------------------------------
+
+      
+    
+    if (!RF95_Sender.isChannelActive()){
+        Screen_display.drawString(0, 0, "Channel is active. Waiting...");
+    } else {
+        
+        Screen_display.drawString(0, 0, "Channel is free. Sending data...");
+        RF95_Sender.waitPacketSent();
+    }
+
+    counter++;
+    delay(1000);
+}
