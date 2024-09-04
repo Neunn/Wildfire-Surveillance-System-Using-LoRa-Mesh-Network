@@ -1,7 +1,7 @@
 /*ลองเขียนใหม่*/
 
 // Import header && Library ---------------------------------------------------------------------
-#include <Arduino.h> 
+#include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <heltec.h>
@@ -14,70 +14,158 @@
 #include <MQUnifiedsensor.h>
 // ----------------------------------------------------------------------------------------------
 
-
-
 // Define Variable ------------------------------------------------------------------------------
 #define LORA_SS_PIN 18
 #define LORA_DIO0_PIN 26
-#define SENDING_MODE 0      /*Mode สำหรับการส่งข้อความไปยัง Node อื่นๆหรือ Gateway*/
-#define RECEIVING_MODE 1    /*Node จะทำการรอรับข้อความจาก Node อื่นๆ*/
-uint8_t MODE = RECEIVING_MODE;
-     /* Topology Network (จำนวนของ Mesh ทั้งหมดที่มีอยู่ใน Network)*/
+/* Topology Network (จำนวนของ Mesh ทั้งหมดที่มีอยู่ใน Network)*/
 #define NODE1_ADDRESS 1
 #define NODE2_ADDRESS 2
 #define NODE3_ADDRESS 3 // ทำเป็น Gateway จำลองรอ Gateway เสร็จก่อน
 const uint8_t SelfAddress = NODE1_ADDRESS;
 const uint8_t GatewayAddress = NODE3_ADDRESS;
+/*Condition*/
 float TEMPERATURE;
 int COUNT_PER_DAY = 0;
-uint8_t PACKAGE_RCV_BUF[RH_MESH_MAX_MESSAGE_LEN];
-// std::string PACKAGE_SND = String("This is Package from " + String(SelfAddress)).c_str(); 
-// std::string PACKAGE_RCV ; /*เก็บข้อความที่รับมาจาก Node อื่นๆ*/
-
+unsigned long OLDTIME = 0;
+unsigned long CYCLE_TIME = 14400000;
+/*Obejct*/
 MQUnifiedsensor MQ135_Sensor("esp32", 3.3, 12, 2, "MQ-135");
 MQUnifiedsensor MQ7_Sensor("esp32", 3.3, 12, 13, "MQ-7");
 DHT DHT22_Sensor(17, DHT22);
-static SSD1306Wire Screen_display(0x3c, 
-                                  500000,
-                                  SDA_OLED,
-                                  SCL_OLED,
-                                  GEOMETRY_128_64,
-                                  RST_OLED);
+static SSD1306Wire Screen_display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 RH_RF95 RF95_Sender(LORA_SS_PIN, LORA_DIO0_PIN);
 RHMesh Mesh_Manager(RF95_Sender, SelfAddress);
+int COUNT = 0;
 // ----------------------------------------------------------------------------------------------
-
-
 
 // Custom Function ------------------------------------------------------------------------------
+void SendDataToGateway(float temperature)
+{
+    /*เตรียมข้อมูลที่จะส่ง*/
+    char DATA[40];
+    snprintf(DATA, sizeof(DATA), "Temp = %.2f C", temperature);
 
+    /*ส่งข้อมูล*/
+    if (Mesh_Manager.sendtoWait((uint8_t *)DATA, sizeof(DATA), GatewayAddress))
+    {
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "Send Message Successfully");
+        Screen_display.display();
+
+        Serial.println("Node : " + String(SelfAddress));
+        Serial.println("Send Message Successfully");
+        // delay(1500);
+    }
+    else
+    {
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "Send Message Fail...");
+        Screen_display.display();
+
+        Serial.println("Node : " + String(SelfAddress));
+        Serial.println("Send Message Fail...");
+        // delay(1500);
+    }
+}
+
+void RecieveAndRoute()
+{
+    uint8_t DATA_BUF[40];
+    uint8_t DATA_BUF_LEN = sizeof(DATA_BUF);
+    uint8_t FROM;
+    if (Mesh_Manager.recvfromAck(DATA_BUF, &DATA_BUF_LEN, &FROM))
+    {
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "Received from Node : " + String(FROM));
+        Screen_display.drawString(0, 20, (char *)DATA_BUF);
+        Screen_display.display();
+
+        Serial.println("Node : " + String(SelfAddress));
+        Serial.println("Received from Node : " + String(FROM));
+        Serial.println((char *)DATA_BUF);
+        // delay(1500);
+
+        // delay(750);
+
+        // if (FROM != GatewayAddress){
+        //     Screen_display.drawString(0, 20, "Sending to GW...");
+        //     Serial.println("Sending to GW...");
+        //     Screen_display.display();
+        //     // delay(500);
+        //     if (Mesh_Manager.sendtoWait(DATA_BUF, DATA_BUF_LEN, GatewayAddress)){
+        //         Screen_display.drawString(0, 20, "Sending Successful....!");
+        //         Screen_display.display();
+        //         Serial.println("Sending Successful....!");
+        //         // delay(500);
+        //     } else {
+        //         Screen_display.drawString(0, 20, "Sending Failed...");
+        //         Screen_display.display();
+        //         Serial.println("Sending Failed...");
+        //         // delay(500);
+        //     }
+        // }
+    }
+    else
+    {
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "No message Recieved");
+        Screen_display.display();
+        Serial.println("Node : " + String(SelfAddress));
+        Serial.println("No message Recieved");
+        Serial.println();
+        // delay(250);
+    }
+}
+float ReadTemp()
+{
+    /*Function อ่านค่าอุณหภูมิโดยมีการ Sampling ค่า 10 ค่า*/
+    float SENSOR_VALUE = 0;
+    float TOTAL_VALUE = 0;
+
+    /*Sampling ค่า Sensor 10 ครั้ง*/
+    for (int i = 0; i < 10; i++)
+    {
+        SENSOR_VALUE = DHT22_Sensor.readTemperature();
+        TOTAL_VALUE += SENSOR_VALUE;
+        delay(125);
+    }
+
+    /*หาค่า เฉลี่ยของการ Sampling*/
+    float AVERAGE_TEMP = TOTAL_VALUE / 10;
+    // Serial.println(AVERAGE_TEMP);
+    return AVERAGE_TEMP;
+}
 // ----------------------------------------------------------------------------------------------
 
-
-
 // Setup Function -------------------------------------------------------------------------------
-void setup(){
-    Heltec.begin(false, /*DisplayEnable*/
+void setup()
+{
+    Heltec.begin(false,                /*DisplayEnable*/
                  false, /*LoRaEnable*/ /*ต้องปิดเพราะไม่งั้นจะไม่ conflix กันกับ RH_RF95.h */
-                 true,  /*SerialEnable*/
-                 true, /*PABOOST*/
+                 true,                 /*SerialEnable*/
+                 true,                 /*PABOOST*/
                  923.2E6 /*Band*/);
     Serial.begin(9600);
-    
+
     /*RF95 setting*/
     RF95_Sender.init();
-    RF95_Sender.setFrequency(923.2);
-    RF95_Sender.setSpreadingFactor(12);
-    RF95_Sender.setSignalBandwidth(125E3);
-    RF95_Sender.setTxPower(23); //ค่อยมาคำนวนอีกที
-    
+    RF95_Sender.setFrequency(923.2); /*ย่านความถี่ UL ที่ กสทช. แนะนำและอยู่ในช่วงที่กฏหมายกำหนด*/
+    RF95_Sender.setSpreadingFactor(12);  /*ตั้งไว้ 12 เพราะต้องการระยะที่ไกลแต่ไม่ได้ต้องการความเร็วที่สูงมาก*/
+    RF95_Sender.setSignalBandwidth(125E3); 
+    RF95_Sender.setTxPower(23); // ค่อยมาคำนวนอีกที
+
+    /*Mesh setting*/
+    // Mesh_Manager.setTimeout(10000);
+
     /*ตั้งค่าหน้าจอ OLED*/
     Screen_display.init();
     Screen_display.clear();
     Screen_display.display();
     Screen_display.setContrast(255);
-
-
 
     /*DHT-22 Sensor Begin*/
     DHT22_Sensor.begin();
@@ -89,7 +177,7 @@ void setup(){
     // MQ135_Sensor.init();
 
     // MQ7_Sensor.setRegressionMethod(1); //_PPM =  a*ratio^b
-    // MQ7_Sensor.setA(99.042); 
+    // MQ7_Sensor.setA(99.042);
     // MQ7_Sensor.setB(-1.518); // Configure the equation to calculate CO concentration value
     // MQ7_Sensor.init();
 
@@ -97,7 +185,7 @@ void setup(){
     // Screen_display.clear();
     // Screen_display.drawString(0, 0, "Pre-heated & Calibration 20 sec pls wait...");
     // Screen_display.display();
-    
+
     // unsigned long TIME_PERIOD = 20000.0;
     // unsigned long OLD_TIME = 0.0;
     // float calcR0_MQ135 = 0.0;
@@ -133,68 +221,109 @@ void setup(){
 }
 // ----------------------------------------------------------------------------------------------
 
-
 // Main Function --------------------------------------------------------------------------------
-void loop(){
+void loop()
+{
+    // Serial.println("Sending to manager_mesh_server3");
+    // TEMPERATURE = DHT22_Sensor.readTemperature();
+    // snprintf(data, sizeof(data), "Hello world ! Count = %d", COUNT);
+    // // Send a message to a rf22_mesh_server
+    // // A route to the destination will be automatically discovered.
+    // if (Mesh_Manager.sendtoWait((uint8_t*)data, sizeof(data), GatewayAddress) == RH_ROUTER_ERROR_NONE){
+    //   // It has been reliably delivered to the next node.
+    //   // Now wait for a reply from the ultimate server
+    //   uint8_t len = sizeof(buf);
+    //   uint8_t from;
+    //   if (Mesh_Manager.recvfromAckTimeout(buf, &len, 3000, &from))
+    //   {
+    //     Serial.print("got reply from : 0x");
+    //     Serial.print(from, HEX);
+    //     Serial.print(": ");
+    //     Serial.println((char*)buf);
+    //   }
+    //   else
+    //   {
+    //     Serial.println("No reply, is rf22_mesh_server1, rf22_mesh_server2 and rf22_mesh_server3 running?");
+    //   }
+    //   COUNT++;
+    // }
+    // else
+    //    Serial.println("sendtoWait failed. Are the intermediate mesh servers running?");
 
-    TEMPERATURE = DHT22_Sensor.readTemperature();
-
-    if (TEMPERATURE >= 27){
-        while(RF95_Sender.isChannelActive()){
-            Screen_display.clear();
-            Screen_display.drawString(0, 0, "Channel is Busy...");
-            Screen_display.display();
-            delay(500);
-        }
-        
-        /*เตรียมข้อมูลที่จะส่ง*/
-        char DATA[RH_MAX_MESSAGE_LEN];
-        snprintf(DATA, sizeof(DATA), "Temp = %.2f : FROM Node =  %d", TEMPERATURE, SelfAddress);
-        
-        /*ส่งข้อมูลไปยัง Gateway*/
-        boolean SENDING = true;
-        while(SENDING){
-            if (Mesh_Manager.sendtoWait((uint8_t*)DATA, sizeof(DATA), NODE3_ADDRESS) == RH_ROUTER_ERROR_NONE){
-                Serial.println("Message sent to Gateway");
-                Screen_display.clear();
-                Screen_display.drawString(0, 0, "Sending Message to GW");
-                Screen_display.display();
-                SENDING = false;
-            }
-            else{
-                Serial.println("Message sending failed");
-                Screen_display.clear();
-                Screen_display.drawString(0, 0, "Message sending failed");
-                Screen_display.drawString(0, 10, "Resending.....");
-                Screen_display.display();
-                SENDING = true;
-            }
-        }
-
-    } else{
-        
+    /*MAIN*/
+    Mesh_Manager.printRoutingTable();
+    unsigned long CURRENTTIME = millis();
+    TEMPERATURE = ReadTemp();
+    Serial.println("Time : " + String(CURRENTTIME) + "msec");
+    Serial.println("TEMP : " + String(TEMPERATURE) + "C");
+    if (CURRENTTIME - OLDTIME > CYCLE_TIME)
+    {
+        SendDataToGateway(TEMPERATURE);
+        OLDTIME = CURRENTTIME; /*อัปเดตเวลา*/
+    }
+    else if (true)
+    {
+        SendDataToGateway(TEMPERATURE);
     }
 
-    // if (!RF95_Sender.isChannelActive()){
-    //     Screen_display.drawString(0, 0, "Channel is active. Waiting...");
+    /*เช็คและส่งต่อข้อมูลจาก Node อื่นๆ*/
+    RecieveAndRoute();
+
+    // if (TEMPERATURE >= 27){
+    //     while(RF95_Sender.isChannelActive()){
+    //         Screen_display.clear();
+    //         Screen_display.drawString(0, 0, "Channel is Busy...");
+    //         Screen_display.display();
+    //         delay(500);
+    //     }
+
+    //     /*ส่งข้อมูลไปยัง Gateway*/
+    //     boolean SENDING = true;
+    //     while(SENDING){
+    //         if (Mesh_Manager.sendtoWait((uint8_t*)DATA, sizeof(DATA), NODE3_ADDRESS) == RH_ROUTER_ERROR_NONE){
+    //             Serial.println("Message sent to Gateway");
+    //             Screen_display.clear();
+    //             Screen_display.drawString(0, 0, "Sending Message to GW");
+    //             Screen_display.display();
+    //             delay(1000);
+    //             uint8_t PACKAGE_RCV_BUF_LEN = sizeof(PACKAGE_RCV_BUF);
+    //             uint8_t FROM;
+    //             if (Mesh_Manager.recvfromAckTimeout(PACKAGE_RCV_BUF, &PACKAGE_RCV_BUF_LEN, 10000, &FROM)){
+    //                 Serial.print("got reply from : 0x");
+    //                 Serial.print(FROM, HEX);
+    //                 Serial.print(": ");
+    //                 Serial.println((char*)PACKAGE_RCV_BUF);
+    //                 Screen_display.clear();
+    //                 Screen_display.drawString(0, 0, "got reply from : 0x" + String(FROM, HEX));
+    //                 Screen_display.drawString(0, 10, ": " + String((char*)PACKAGE_RCV_BUF));
+    //                 Screen_display.display();
+    //                 delay(1500);
+    //             } else {
+    //                 Serial.println("No reply, is rf22_mesh_server1, rf22_mesh_server2 and rf22_mesh_server3 running?");
+    //                 Screen_display.clear();
+    //                 Screen_display.drawString(0, 0, "No Reply");
+    //                 Screen_display.drawString(0, 10, "Trying Again...");
+    //                 delay(500);
+    //             }
+    //             SENDING = false;
+    //         }
+    //         else{
+    //             Serial.println("Message sending failed");
+    //             Screen_display.clear();
+    //             Screen_display.drawString(0, 0, "Message sending failed");
+    //             Screen_display.drawString(0, 10, "Resending.....");
+    //             Screen_display.display();
+    //             SENDING = true;
+    //             delay(500);
+    //         }
+    //     }
+
     // } else {
-        
-    //     Screen_display.drawString(0, 0, "Channel is free. Sending data...");
-    //     RF95_Sender.waitPacketSent();
+    //     Serial.println("Normal Temp");
+    //     Screen_display.clear();
+    //     Screen_display.drawString(0, 0, "Normal Temp");
+    //     Screen_display.display();
     // }
 
-
-    // Serial.println("MQ135_Sensor");
-    // MQ135_Sensor.update();
-    // MQ135_Sensor.readSensor();
-    // MQ135_Sensor.serialDebug();
-
-    // Serial.println("MQ7_Sensor");
-    // MQ7_Sensor.update();
-    // MQ7_Sensor.readSensor();
-    // MQ7_Sensor.serialDebug();
-
-
-
-    delay(1000);
+    // delay(1000);
 }
