@@ -141,7 +141,7 @@ void SendDataToGateway(float TEMPERATURE){
 
 }
 
-// ไม่เหมือน
+// (ตรงนี้ไม่เหมือน)
 // void RecieveAndRoute(){
 //     /* Function นี้จะเป็นการรับค่าจาก Node อื่นๆแล้วทำการ Display ว่ามาจาก Node ไหนและ Route ต่อไปยัง Node อื่นๆ */
 
