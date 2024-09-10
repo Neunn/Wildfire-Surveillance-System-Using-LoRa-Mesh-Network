@@ -28,17 +28,14 @@
 #define NODE1_ADDRESS 1
 #define NODE2_ADDRESS 2
 #define NODE3_ADDRESS 3 // ทำเป็น Gateway จำลองรอ Gateway เสร็จก่อน
-#define N_NODES 10
-uint8_t ROUTES[N_NODES];
-int16_t RSSI[N_NODES];
 const uint8_t SelfAddress = NODE1_ADDRESS;
 const uint8_t GatewayAddress = NODE3_ADDRESS;
 
 /*Condition*/
 float TEMPERATURE;
-int COUNT_PER_DAY = 0;
+float TEMPERATURE_THRESHOLD = 45;
 unsigned long OLDTIME = 0;
-unsigned long CYCLE_TIME = 14400000;
+const unsigned long INTERVAL = 3 * 60 * 60 * 1000;  // 3 ชั่วโมง
 
 /* ประกาศ Object  */
 MQUnifiedsensor MQ135_Sensor("esp32", 3.3, 12, 2, "MQ-135");
@@ -68,13 +65,206 @@ float readDHTTemperature() {
         delay(125);
     }
     float AVERAGE_C = TOTAL_VALUES / 10;
+    Screen_display.clear();
+    Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+    Screen_display.drawString(0, 10, "Temperature: " + String(AVERAGE_C));
+    Screen_display.display();
+    Serial.println("Temerature : " + String(AVERAGE_C));
     return AVERAGE_C;
 
 }
 
-float SendDataToGateway(float TEMP_C){
+void SendDataToGateway(float TEMPERATURE){
+    /* Function ในการส่งข้อมูลนี้ไปยัง Gateway โดยจะมีการค้นหาเส้นทางอัตโนมัติหรือ Automatic Routing นั่นเอง และเมื่อส่งข้อความสำเร็จจะมี message ส่งคืนกลับมาที่ node นี้นั่นเอง*/
+
+    /* เตรียมข้อมูลที่จะส่ง */
+    char MESSAGE[40];
+    uint8_t REPLY[40];
+    uint8_t REPLY_LEN = sizeof(REPLY);
+    uint8_t FROM;
+    snprintf(MESSAGE, sizeof(MESSAGE), "Temp = %.2f C", TEMPERATURE);
+    
+    /* check ช่องสัญญาณ */
+    // Serial.println("ค้างตรงนี้");
+    // while (RF95_Sender.isChannelActive()){
+    //     /* Loop เช็ค channel ว่ามีคนใช้อยู่ไหมใช้หลักการ CAD */
+    //     /* คืนค่า True เมื่อ chanel กำลังมีคนใช้งานเยอะหรือยุ่งอยู่ */
+    //     Serial.println("Chanel is Busy !!!");
+    //     delay(200);
+    // }
+    // Serial.println("ค้างตรงนี้");
+
+    /* ส่งข้อมูล */
+    if (Mesh_Manager.sendtoWait((uint8_t *)MESSAGE, sizeof(MESSAGE), GatewayAddress)){
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + SelfAddress);
+        Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
+        Screen_display.drawString(0, 20, "Send Data to Gateway....");
+        Screen_display.display();
+        Serial.println("Temperature : " + String(TEMPERATURE));
+        Serial.println("Send Data to Gateway");
+        delay(500);
+
+        /* คิดว่าอาจจะไม่ต้องเพราะมี function received route อยู่แล้ว */        
+        // if (Mesh_Manager.recvfromAck(REPLY, &REPLY_LEN, &FROM)){
+        //     Screen_display.clear();
+        //     Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        //     Screen_display.drawString(0, 10, "Send Message Successful");
+        //     Screen_display.drawString(0, 20, "Reply : " + *REPLY);
+        //     Screen_display.drawString(0, 30, "Response From : " + String(FROM));
+        //     Screen_display.display();
+        //     Serial.println("Node : " + SelfAddress);
+        //     Serial.println("Send Message Successful");
+        //     Serial.println("Reply : " + *REPLY);
+        //     Serial.println("Response From : " + String(FROM));
+        //     delay(500);
+        // }
+
+        /* แสดงค่า Routing table */
+        Serial.println("############ Routing Table ############");
+        Serial.println();
+        Mesh_Manager.printRoutingTable();
+        Serial.println();
+        Serial.println("#######################################");
+
+    } else {
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + SelfAddress);
+        Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
+        Screen_display.drawString(0, 20, "Send Data to Gateway Fail!!!!");
+        Screen_display.drawString(0, 30, "Retry again....");
+        Screen_display.display();
+
+        Serial.println("Sendtowait Fail");
+        delay(500);
+    }
+
+}
+
+// ไม่เหมือน
+// void RecieveAndRoute(){
+//     /* Function นี้จะเป็นการรับค่าจาก Node อื่นๆแล้วทำการ Display ว่ามาจาก Node ไหนและ Route ต่อไปยัง Node อื่นๆ */
+
+//     /* Function recvfromack จะทำหน้าที่รับข้อมูลที่มาจาก Node อื่นๆหากเป็น Node ของตัวเองจะทำการ copy ข้อมูลแล้วเก็บลงในตัวแปรที่เราใส่เข้าไป ณ ที่นี้คือ BUF แต่หากไม่ใช่ของตัว Node มันเองมันจะทำการ Route และส่งต่อไปยัง Node อื่นๆ ทำให้ Function นี้ต้องมีการรันใน loop อยู่เสมอ */
+
+//     /* The recvfromAck() function is responsible not just for receiving and delivering messages addressed to this node (or RH_BROADCAST_ADDRESS), but it is also responsible for routing other message to their next hop. This means that it is important to call recvfromAck() or recvfromAckTimeout() frequently in your main loop. recvfromAck() will return false if it receives a message but it is not for this node. ref : https://www.airspayce.com/mikem/arduino/RadioHead/classRHRouter.html#a7ac935defd2418f45a4d9f391f7e0384*/
+    
+
+//     /* Create BUFFER */
+//     uint8_t BUF[50];
+//     uint8_t BUF_LEN = sizeof(BUF);
+//     uint8_t FROM;
+//     char MESSAGE[50];
+//     snprintf(MESSAGE, sizeof(MESSAGE), "Reply from hop %u" , SelfAddress);
+    
+
+//     /* รับข้อความ หรือ route ข้อความไปยัง Node ถัดไป */
+//     if (Mesh_Manager.recvfromAck(BUF, &BUF_LEN, &FROM)){
+//         Screen_display.clear();
+//         Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+//         Screen_display.drawString(0, 10, "Data Received from Node : " + String(FROM, HEX));
+//         Screen_display.drawString(0, 20, "Data : " + String((char *)BUF));
+//         Screen_display.drawString(0, 30, "Route to Next Node");
+//         Screen_display.display();
+//         delay(500);
+
+//         /* ส่ง Reply กลับไปยัง Node ที่รับมา */
+//         if (Mesh_Manager.sendtoWait((uint8_t *)MESSAGE, strlen(MESSAGE), FROM) != RH_ROUTER_ERROR_NONE){
+//             Screen_display.clear();
+//             Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+//             Screen_display.drawString(0, 10, "Send reply back to : " + String(FROM, HEX));
+//             Screen_display.display();
+//             delay(500);
+//         } else {
+//             Screen_display.clear();
+//             Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+//             Screen_display.drawString(0, 10, "Error sending reply back");
+//             Screen_display.display();
+//             Serial.println();
+//             Serial.println("Node : " + String(SelfAddress));
+//             Serial.println("Error sending reply back");
+//             Serial.println();
+//         }
+
+//     } else {
+//         Serial.println("No Message from other node or route failed");
+//         Screen_display.clear();
+//         Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+//         Screen_display.drawString(0, 10, "No Message come");
+//         Screen_display.display();
+//         delay(500);
+//     }
+    
+// }
+
+void RecieveAndRoute(){
+    /* Function นี้จะเป็นการรับค่าจาก Node อื่นๆแล้วทำการ Display ว่ามาจาก Node ไหนและ Route ต่อไปยัง Node อื่นๆ */
+
+    /* Function recvfromack จะทำหน้าที่รับข้อมูลที่มาจาก Node อื่นๆหากเป็น Node ของตัวเองจะทำการ copy ข้อมูลแล้วเก็บลงในตัวแปรที่เราใส่เข้าไป ณ ที่นี้คือ BUF แต่หากไม่ใช่ของตัว Node มันเองมันจะทำการ Route และส่งต่อไปยัง Node อื่นๆ ทำให้ Function นี้ต้องมีการรันใน loop อยู่เสมอ */
+
+    /* The recvfromAck() function is responsible not just for receiving and delivering messages addressed to this node (or RH_BROADCAST_ADDRESS), but it is also responsible for routing other message to their next hop. This means that it is important to call recvfromAck() or recvfromAckTimeout() frequently in your main loop. recvfromAck() will return false if it receives a message but it is not for this node. ref : https://www.airspayce.com/mikem/arduino/RadioHead/classRHRouter.html#a7ac935defd2418f45a4d9f391f7e0384*/
+    
+
+    /* Create BUFFER */
+    uint8_t BUF[40];
+    uint8_t BUF_LEN = sizeof(BUF);
+    uint8_t FROM;
+    char MESSAGE[40];
+    snprintf(MESSAGE, sizeof(MESSAGE), "Reply from hop %u" , SelfAddress);
+    
+
+    /* รับข้อความ หรือ route ข้อความไปยัง Node ถัดไป */
+    if (Mesh_Manager.recvfromAck(BUF, &BUF_LEN, &FROM)){
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "Data Received from Node : " + String(FROM, HEX));
+        Screen_display.drawString(0, 20, "Data : " + String((char *)BUF));
+        Screen_display.drawString(0, 30, "Complete To Gateway");
+        Screen_display.display();
+        Serial.println();
+        Serial.println("Node : " + String(SelfAddress));
+        Serial.println("Data Received from Node : " + String(FROM, HEX));
+        Serial.println("Data : " + String((char *)BUF));
+        Serial.println("Complete To Gateway");
+        Serial.println();
+        delay(500);
+
+        /* ส่ง Reply กลับไปยัง Node ที่รับมา */
+        if (Mesh_Manager.sendtoWait((uint8_t *)MESSAGE, strlen(MESSAGE), FROM)){
+            Screen_display.clear();
+            Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+            Screen_display.drawString(0, 10, "Send reply back to : " + String(FROM, HEX));
+            Screen_display.display();
+            Serial.println();
+            Serial.println("Send reply back to : " + String(FROM, HEX));
+            Serial.println();
+
+
+            delay(500);
+        } else {
+            Screen_display.clear();
+            Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+            Screen_display.drawString(0, 10, "Error sending reply back");
+            Screen_display.display();
+            Serial.println();
+            Serial.println("Node : " + String(SelfAddress));
+            Serial.println("Error sending reply back");
+            Serial.println();
+        }
+
+    } else {
+        Serial.println();
+        Serial.println("No Message from other node or route failed");
+        Serial.println();
+        Screen_display.clear();
+        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+        Screen_display.drawString(0, 10, "No Message come");
+        Screen_display.display();
+        delay(500);
+    }
     
 }
+
 
 // ----------------------------------------------------------------------------------------------
 
@@ -122,7 +312,36 @@ void setup(){
 
 
 // Loop Function --------------------------------------------------------------------------------
+
 void loop(){
+    /* ต้องการให้ตัว endnode ตัวนี้มีการส่งข้อมูลทุกๆ 3 ชั่วโมงไปหา gateway แต่หากมีอุณหภูมิสูงกว่าเกินที่กำหนดให้ทำการส่งข้อมูลไปเลยโดยไม่ต้องรอครบ 3 ชั่วโมง แล้วส่งครั้งเดียวจะได้ไม่เกิดการ flood message */
+    
+    /* อ่านค่าอุณหภูมิ */
+    float TEMPERATURE = readDHTTemperature();
+
+    /* จับเวลา */
+    unsigned long CURRENTIME = millis();
+    /* เช็คหากครบสามชั่วโมงให้ส่งข้อมูลเลย */
+    if (CURRENTIME - OLDTIME >= INTERVAL){
+        OLDTIME = CURRENTIME;
+        SendDataToGateway(TEMPERATURE);
+    }
+
+    /* เช็คหากเงื่อนบางประการ ณ ตอนนี้กำหนดให้ อุณหภูมิ สูงกว่าค่า Threshold ให้ส่งเลยโดยไม่ต้องรอให้ครบสามชั่วโมง */
+    // while (TEMPERATURE >= TEMPERATURE_THRESHOLD){
+    //     SendDataToGateway(TEMPERATURE);
+    //     delay(100);
+    // }
+
+
+    SendDataToGateway(TEMPERATURE);
+    Serial.println();
+    Serial.println("Time = " + String(OLDTIME));
+    Serial.println();
+
+    /* รับและ route ข้อมูลจาก node อื่น */
+    RecieveAndRoute();
+    delay(100);
 
 }
 
