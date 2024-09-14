@@ -21,11 +21,11 @@
 // #define LORA_DIO0_PIN 26
 
 // /* Topology Network (จำนวนของ Mesh ทั้งหมดที่มีอยู่ใน Network)*/
-// #define NODE_ADDRESS 1
+// #define NODE_ADDRESS 254 // ทำเป็น Gateway จำลองรอ Gateway เสร็จก่อน
 // const uint8_t SelfAddress = NODE_ADDRESS;
-// const uint8_t GatewayAddress = 254;
+// // const uint8_t GatewayAddress = NODE3_ADDRESS;
 
-// /* Condition สำหรับการตัดสินใจส่ง */
+// /*Condition*/
 // float TEMPERATURE;
 // float TEMPERATURE_THRESHOLD = 45;
 // unsigned long OLDTIME = 0;
@@ -43,92 +43,82 @@
 
 // // Custom Function ------------------------------------------------------------------------------
 
-// float readDHTTemperature()
-// {
-//     /* มีการ Smapling ค่าเป็นจำนวนสิบค่า แล้วหาค่าเฉลี่ยออกมา */
+// // float readDHTTemperature() {
+// //     /* มีการ Smapling ค่าเป็นจำนวนสิบค่า แล้วหาค่าเฉลี่ยออกมา */
 
-//     float TEMP_C = 0;
-//     float TOTAL_VALUES = 0;
-//     for (int i = 0; i < 10; i++)
-//     {
-//         TEMP_C = DHT22_Sensor.readTemperature();
-//         TOTAL_VALUES += TEMP_C;
-//         delay(125);
-//     }
-//     float AVERAGE_C = TOTAL_VALUES / 10;
-//     Screen_display.clear();
-//     Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
-//     Screen_display.drawString(0, 10, "Temperature: " + String(AVERAGE_C));
-//     Screen_display.display();
-//     return AVERAGE_C;
-// }
+// //     float TEMP_C = 0;
+// //     float TOTAL_VALUES = 0;
+// //     for (int i = 0; i < 10; i++){
+// //         TEMP_C = DHT22_Sensor.readTemperature();
+// //         TOTAL_VALUES += TEMP_C;
+// //         delay(125);
+// //     }
+// //     float AVERAGE_C = TOTAL_VALUES / 10;
+// //     Screen_display.clear();
+// //     Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
+// //     Screen_display.drawString(0, 10, "Temperature: " + String(AVERAGE_C));
+// //     Screen_display.display();
+// //     Serial.println("Temerature : " + String(AVERAGE_C));
+// //     return AVERAGE_C;
 
-// void SendDataToGateway(float TEMPERATURE)
-// {
-//     /* Function ในการส่งข้อมูลนี้ไปยัง Gateway โดยจะมีการค้นหาเส้นทางอัตโนมัติหรือ Automatic Routing นั่นเอง และเมื่อส่งข้อความสำเร็จจะมี message ส่งคืนกลับมาที่ node นี้นั่นเอง*/
+// // }
 
-//     /* เตรียมข้อมูลที่จะส่ง */
-//     char MESSAGE[40];
-//     uint8_t REPLY[40];
-//     uint8_t REPLY_LEN = sizeof(REPLY);
-//     uint8_t FROM;
-//     snprintf(MESSAGE, sizeof(MESSAGE), "Temp = %.2f C", TEMPERATURE);
+// // void SendDataToGateway(float TEMPERATURE){
+// //     /* Function ในการส่งข้อมูลนี้ไปยัง Gateway โดยจะมีการค้นหาเส้นทางอัตโนมัติหรือ Automatic Routing นั่นเอง และเมื่อส่งข้อความสำเร็จจะมี message ส่งคืนกลับมาที่ node นี้นั่นเอง*/
 
-//     /* ส่งข้อมูล */
-//     if (Mesh_Manager.sendtoWait((uint8_t *)MESSAGE, sizeof(MESSAGE), GatewayAddress))
-//     {
-//         Screen_display.clear();
-//         Screen_display.drawString(0, 0, "Node : " + SelfAddress);
-//         Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
-//         Screen_display.drawString(0, 20, "Send Data to Gateway....");
-//         Screen_display.display();
-//         Serial.println("Temperature : " + String(TEMPERATURE));
-//         Serial.println("Send Data to Gateway");
-//         delay(500);
+// //     /* เตรียมข้อมูลที่จะส่ง */
+// //     char MESSAGE[RH_MAX_MESSAGE_LEN];
+// //     uint8_t REPLY[RH_MAX_MESSAGE_LEN];
+// //     uint8_t REPLY_LEN = sizeof(REPLY);
+// //     uint8_t FROM;
+// //     snprintf(MESSAGE, sizeof(MESSAGE), "Temp = %.2f C", TEMPERATURE);
 
-//         /* แสดงค่า Routing table */
-//         // Serial.println("############ Routing Table ############");
-//         // Serial.println();
-//         // Mesh_Manager.printRoutingTable();
-//         // Serial.println();
-//         // Serial.println("#######################################");
+// //     /* check ช่องสัญญาณ */
+// //     while (RF95_Sender.isChannelActive()){
+// //         /* Loop เช็ค channel ว่ามีคนใช้อยู่ไหมใช้หลักการ CAD */
+// //         /* คืนค่า True เมื่อ chanel กำลังมีคนใช้งานเยอะหรือยุ่งอยู่ */
+// //         Serial.println("Chanel is Busy !!!");
+// //         delay(200);
+// //     }
 
-//         if (Mesh_Manager.recvfromAckTimeout(REPLY, &REPLY_LEN, 10000, &FROM))
-//         {
-//             Screen_display.clear();
-//             Screen_display.drawString(0, 0, (char *)REPLY);
-//             Screen_display.display();
+// //     /* ส่งข้อมูล */
+// //     if (Mesh_Manager.sendtoWait((uint8_t *)MESSAGE, sizeof(MESSAGE), GatewayAddress)){
+// //         Screen_display.clear();
+// //         Screen_display.drawString(0, 0, "Node : " + SelfAddress);
+// //         Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
+// //         Screen_display.drawString(0, 20, "Send Data to Gateway....");
+// //         Screen_display.display();
+// //         Serial.println("Temperature : " + String(TEMPERATURE));
+// //         Serial.println("Send Data to Gateway");
 
-//             Serial.println();
-//             Serial.println((char *)REPLY);
-//             Serial.println();
-//         }
-//         else
-//         {
-//             Screen_display.clear();
-//             Screen_display.drawString(0, 0, "Recieve Reply Failed");
-//             Screen_display.display();
+// //         if (Mesh_Manager.recvfromAck(REPLY, &REPLY_LEN, &FROM)){
+// //             Screen_display.clear();
+// //             Screen_display.drawString(0, 0, "Node : " + SelfAddress);
+// //             Screen_display.drawString(0, 10, "Send Message Successful");
+// //             Screen_display.drawString(0, 20, "Reply : " + *REPLY);
+// //             Screen_display.drawString(0, 30, "Response From : " + String(FROM));
+// //             Screen_display.display();
+// //         }
 
-//             Serial.println();
-//             Serial.println("Recieve Reply Failed");
-//             Serial.println();
-//         }
+// //         /* แสดงค่า Routing table */
+// //         Serial.println("############ Routing Table ############");
+// //         Serial.println();
+// //         Mesh_Manager.printRoutingTable();
+// //         Serial.println();
+// //         Serial.println("#######################################");
 
-//         delay(500);
-//     }
-//     else
-//     {
-//         Screen_display.clear();
-//         Screen_display.drawString(0, 0, "Node : " + SelfAddress);
-//         Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
-//         Screen_display.drawString(0, 20, "Send Data to Gateway Fail!!!!");
-//         Screen_display.drawString(0, 30, "Retry again....");
-//         Screen_display.display();
+// //     } else {
+// //         Screen_display.clear();
+// //         Screen_display.drawString(0, 0, "Node : " + SelfAddress);
+// //         Screen_display.drawString(0, 10, "Temperature : " + String(TEMPERATURE));
+// //         Screen_display.drawString(0, 20, "Send Data to Gateway Fail!!!!");
+// //         Screen_display.drawString(0, 30, "Retry again....");
+// //         Screen_display.display();
 
-//         Serial.println("Sendtowait Fail");
-//         delay(500);
-//     }
-// }
+// //         Serial.println("Sendtowait Fail");
+// //     }
+
+// // }
 
 // void RecieveAndRoute()
 // {
@@ -243,32 +233,26 @@
 //     /* ต้องการให้ตัว endnode ตัวนี้มีการส่งข้อมูลทุกๆ 3 ชั่วโมงไปหา gateway แต่หากมีอุณหภูมิสูงกว่าเกินที่กำหนดให้ทำการส่งข้อมูลไปเลยโดยไม่ต้องรอครบ 3 ชั่วโมง แล้วส่งครั้งเดียวจะได้ไม่เกิดการ flood message */
 
 //     /* อ่านค่าอุณหภูมิ */
-//     float TEMPERATURE = readDHTTemperature();
+//     // float TEMPERATURE = readDHTTemperature();
 
-//     /* จับเวลา */
-//     unsigned long CURRENTIME = millis();
-//     /* เช็คหากครบสามชั่วโมงให้ส่งข้อมูลเลย */
-//     if (CURRENTIME - OLDTIME >= INTERVAL)
-//     {
-//         OLDTIME = CURRENTIME;
-//         SendDataToGateway(TEMPERATURE);
-//     }
+//     // /* จับเวลา */
+//     // unsigned long CURRENTIME = millis();
+//     // Serial.println("ถึงนี่ละ");
+//     // /* เช็คหากครบสามชั่วโมงให้ส่งข้อมูลเลย */
+//     // if (CURRENTIME - OLDTIME >= INTERVAL){
+//     //     OLDTIME = CURRENTIME;
+//     //     SendDataToGateway(TEMPERATURE);
+//     // }
 
-//     /* เช็คหากเงื่อนบางประการ ณ ตอนนี้กำหนดให้ อุณหภูมิ สูงกว่าค่า Threshold ให้ส่งเลยโดยไม่ต้องรอให้ครบสามชั่วโมง */
+//     // /* เช็คหากเงื่อนบางประการ ณ ตอนนี้กำหนดให้ อุณหภูมิ สูงกว่าค่า Threshold ให้ส่งเลยโดยไม่ต้องรอให้ครบสามชั่วโมง */
 //     // while (TEMPERATURE >= TEMPERATURE_THRESHOLD){
 //     //     SendDataToGateway(TEMPERATURE);
 //     //     delay(100);
 //     // }
-//     if (TEMPERATURE >= 27.0)
-//     {
-//         SendDataToGateway(TEMPERATURE);
-//     }
-//     Serial.println();
-//     Serial.println("Time = " + String(CURRENTIME));
-//     Serial.println();
 
 //     /* รับและ route ข้อมูลจาก node อื่น */
 //     RecieveAndRoute();
+//     delay(100);
 // }
 
 // // ----------------------------------------------------------------------------------------------
