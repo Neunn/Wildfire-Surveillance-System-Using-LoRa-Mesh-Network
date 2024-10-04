@@ -1,6 +1,5 @@
-/*ลองเขียนใหม่*/
+/// ส่งได้ดีมาก
 
-// Import header && Library ---------------------------------------------------------------------
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -11,319 +10,144 @@
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
-#include <MQUnifiedsensor.h>
-// ----------------------------------------------------------------------------------------------
 
-// Define Variable ------------------------------------------------------------------------------
-#define LORA_SS_PIN 18
-#define LORA_DIO0_PIN 26
-/* Topology Network (จำนวนของ Mesh ทั้งหมดที่มีอยู่ใน Network)*/
-#define NODE1_ADDRESS 1
-#define NODE2_ADDRESS 2
-#define NODE3_ADDRESS 3 // ทำเป็น Gateway จำลองรอ Gateway เสร็จก่อน
-const uint8_t SelfAddress = NODE1_ADDRESS;
-const uint8_t GatewayAddress = NODE3_ADDRESS;
-/*Condition*/
-float TEMPERATURE;
-int COUNT_PER_DAY = 0;
-unsigned long OLDTIME = 0;
-unsigned long CYCLE_TIME = 14400000;
-/*Obejct*/
-MQUnifiedsensor MQ135_Sensor("esp32", 3.3, 12, 2, "MQ-135");
-MQUnifiedsensor MQ7_Sensor("esp32", 3.3, 12, 13, "MQ-7");
-DHT DHT22_Sensor(17, DHT22);
-static SSD1306Wire Screen_display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
-RH_RF95 RF95_Sender(LORA_SS_PIN, LORA_DIO0_PIN);
-RHMesh Mesh_Manager(RF95_Sender, SelfAddress);
-int COUNT = 0;
-// ----------------------------------------------------------------------------------------------
+// Change to 434.0 or other frequency, must match RX's freq!
+#define RF95_FREQ 923.2
 
-// Custom Function ------------------------------------------------------------------------------
-void SendDataToGateway(float temperature)
+int nodeIdSelf = 1;
+int nodeIdDestination = 4;
+
+// Singleton instance of the radio driver
+RH_RF95 driver(18, 26);
+
+// Class to manage message delivery and receipt, using the driver declared above
+RHMesh *manager;
+
+int sess_start, sendTimeoutStart, delivCount;
+
+String message = "Hello! from node " + (String)nodeIdSelf + ", to node " + (String)nodeIdDestination;
+String messageResponse = "Alert Received!";
+
+void setup_lora()
 {
-    /*เตรียมข้อมูลที่จะส่ง*/
-    char DATA[40];
-    snprintf(DATA, sizeof(DATA), "Temp = %.2f C", temperature);
 
-    /*ส่งข้อมูล*/
-    if (Mesh_Manager.sendtoWait((uint8_t *)DATA, sizeof(DATA), GatewayAddress))
+  manager = new RHMesh(driver, nodeIdSelf);
+
+  if (!manager->init())
+  {
+    Serial.println(F("init failed"));
+  }
+  else
+  {
+    Serial.println("Mesh Node \"" + (String)nodeIdSelf + "\" Up and Running!");
+  }
+
+  driver.setTxPower(23, false);
+  driver.setCADTimeout(500);
+  driver.setFrequency(RF95_FREQ);
+  Serial.println("RF95 ready");
+}
+
+// ----------------------
+// ACTIONS
+// === LoRa
+uint8_t buf[RH_MESH_MAX_MESSAGE_LEN];
+
+void sendMessage(String _message, int _nodeIdDestination, int _sendMessageCount)
+{
+  for (int i = 0; i < _sendMessageCount; i++)
+  {
+    Serial.println("Sending to RF95 Mesh Node \"" + (String)_nodeIdDestination + "\"!");
+    // Send a message to a rf95_mesh_node
+    // A route to the destination will be automatically discovered.
+
+    char messageChar[_message.length() + 1];
+    strcpy(messageChar, _message.c_str());
+
+    int send_start = millis();
+    int errorLog = manager->sendtoWait((uint8_t *)messageChar, sizeof(messageChar), nodeIdDestination);
+    if (errorLog == RH_ROUTER_ERROR_NONE)
     {
-        Screen_display.clear();
-        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
-        Screen_display.drawString(0, 10, "Send Message Successfully");
-        Screen_display.display();
+      // It has been reliably delivered to the next node.
+      // count how long sending take
+      int send_end = millis();
+      int send_time = send_end - send_start;
+      Serial.println("sending time: " + (String)send_time);
 
-        Serial.println("Node : " + String(SelfAddress));
-        Serial.println("Send Message Successfully");
-        // delay(1500);
+      // Now wait for a reply from the ultimate server
+      uint8_t len = sizeof(buf);
+      uint8_t from;
+      if (manager->recvfromAckTimeout(buf, &len, 20000, &from))
+      {
+        Serial.print("Got Reply from ");
+        Serial.print(from, HEX);
+        Serial.println(":");
+        Serial.println((char *)buf);
+      }
+      else
+      {
+        Serial.println("No reply, is rf95_mesh_node1, rf95_mesh_node2 and rf95_mesh_node3 running?");
+      }
     }
     else
-    {
-        Screen_display.clear();
-        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
-        Screen_display.drawString(0, 10, "Send Message Fail...");
-        Screen_display.display();
-
-        Serial.println("Node : " + String(SelfAddress));
-        Serial.println("Send Message Fail...");
-        // delay(1500);
-    }
+      Serial.println("sendtoWait failed. Are the intermediate mesh nodes running?");
+  }
 }
 
-void RecieveAndRoute()
+void listen_lora(int listenTimeout)
 {
-    uint8_t DATA_BUF[40];
-    uint8_t DATA_BUF_LEN = sizeof(DATA_BUF);
-    uint8_t FROM;
-    if (Mesh_Manager.recvfromAck(DATA_BUF, &DATA_BUF_LEN, &FROM))
-    {
-        Screen_display.clear();
-        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
-        Screen_display.drawString(0, 10, "Received from Node : " + String(FROM));
-        Screen_display.drawString(0, 20, (char *)DATA_BUF);
-        Screen_display.display();
+  uint8_t len = sizeof(buf);
+  uint8_t nodeIdFrom;
 
-        Serial.println("Node : " + String(SelfAddress));
-        Serial.println("Received from Node : " + String(FROM));
-        Serial.println((char *)DATA_BUF);
-        // delay(1500);
+  if (manager->recvfromAckTimeout(buf, &len, listenTimeout, &nodeIdFrom))
+  {
+    Serial.print("Got Message nodeIdFrom ");
+    Serial.print(nodeIdFrom, HEX);
+    Serial.println(":");
+    Serial.println((char *)buf);
 
-        // delay(750);
+    Serial.println("lastRssi = " + (String)driver.lastRssi());
 
-        // if (FROM != GatewayAddress){
-        //     Screen_display.drawString(0, 20, "Sending to GW...");
-        //     Serial.println("Sending to GW...");
-        //     Screen_display.display();
-        //     // delay(500);
-        //     if (Mesh_Manager.sendtoWait(DATA_BUF, DATA_BUF_LEN, GatewayAddress)){
-        //         Screen_display.drawString(0, 20, "Sending Successful....!");
-        //         Screen_display.display();
-        //         Serial.println("Sending Successful....!");
-        //         // delay(500);
-        //     } else {
-        //         Screen_display.drawString(0, 20, "Sending Failed...");
-        //         Screen_display.display();
-        //         Serial.println("Sending Failed...");
-        //         // delay(500);
-        //     }
-        // }
-    }
-    else
-    {
-        Screen_display.clear();
-        Screen_display.drawString(0, 0, "Node : " + String(SelfAddress));
-        Screen_display.drawString(0, 10, "No message Recieved");
-        Screen_display.display();
-        Serial.println("Node : " + String(SelfAddress));
-        Serial.println("No message Recieved");
-        Serial.println();
-        // delay(250);
-    }
+    // Send a reply back to the originator client
+    char messageResponseChar[messageResponse.length() + 1];
+    strcpy(messageResponseChar, messageResponse.c_str());
+    if (manager->sendtoWait((uint8_t *)messageResponseChar, sizeof(messageResponseChar), nodeIdFrom) != RH_ROUTER_ERROR_NONE)
+      Serial.println("sendtoWait failed");
+  }
 }
-float ReadTemp()
-{
-    /*Function อ่านค่าอุณหภูมิโดยมีการ Sampling ค่า 10 ค่า*/
-    float SENSOR_VALUE = 0;
-    float TOTAL_VALUE = 0;
 
-    /*Sampling ค่า Sensor 10 ครั้ง*/
-    for (int i = 0; i < 10; i++)
-    {
-        SENSOR_VALUE = DHT22_Sensor.readTemperature();
-        TOTAL_VALUE += SENSOR_VALUE;
-        delay(125);
-    }
-
-    /*หาค่า เฉลี่ยของการ Sampling*/
-    float AVERAGE_TEMP = TOTAL_VALUE / 10;
-    // Serial.println(AVERAGE_TEMP);
-    return AVERAGE_TEMP;
-}
-// ----------------------------------------------------------------------------------------------
-
-// Setup Function -------------------------------------------------------------------------------
+// ----------------------
+// MAIN
 void setup()
 {
-    Heltec.begin(false,                /*DisplayEnable*/
-                 false, /*LoRaEnable*/ /*ต้องปิดเพราะไม่งั้นจะไม่ conflix กันกับ RH_RF95.h */
-                 true,                 /*SerialEnable*/
-                 true,                 /*PABOOST*/
-                 923.2E6 /*Band*/);
-    Serial.begin(9600);
 
-    /*RF95 setting*/
-    RF95_Sender.init();
-    RF95_Sender.setFrequency(923.2); /*ย่านความถี่ UL ที่ กสทช. แนะนำและอยู่ในช่วงที่กฏหมายกำหนด*/
-    RF95_Sender.setSpreadingFactor(12);  /*ตั้งไว้ 12 เพราะต้องการระยะที่ไกลแต่ไม่ได้ต้องการความเร็วที่สูงมาก*/
-    RF95_Sender.setSignalBandwidth(125E3); 
-    RF95_Sender.setTxPower(23); // ค่อยมาคำนวนอีกที
-
-    /*Mesh setting*/
-    // Mesh_Manager.setTimeout(10000);
-
-    /*ตั้งค่าหน้าจอ OLED*/
-    Screen_display.init();
-    Screen_display.clear();
-    Screen_display.display();
-    Screen_display.setContrast(255);
-
-    /*DHT-22 Sensor Begin*/
-    DHT22_Sensor.begin();
-
-    // /*MQ Sensor*/
-    // MQ135_Sensor.setRegressionMethod(1); //_PPM =  a*ratio^b
-    // MQ135_Sensor.setA(110.47);
-    // MQ135_Sensor.setB(-2.862); // Configure the equation to to calculate CO2 concentration
-    // MQ135_Sensor.init();
-
-    // MQ7_Sensor.setRegressionMethod(1); //_PPM =  a*ratio^b
-    // MQ7_Sensor.setA(99.042);
-    // MQ7_Sensor.setB(-1.518); // Configure the equation to calculate CO concentration value
-    // MQ7_Sensor.init();
-
-    // /*Pre-heat 20 วิ && Calibration*/
-    // Screen_display.clear();
-    // Screen_display.drawString(0, 0, "Pre-heated & Calibration 20 sec pls wait...");
-    // Screen_display.display();
-
-    // unsigned long TIME_PERIOD = 20000.0;
-    // unsigned long OLD_TIME = 0.0;
-    // float calcR0_MQ135 = 0.0;
-    // float calcR0_MQ7 = 0.0;
-    // for (int i = 1; i <= 10; i++){
-    //     MQ135_Sensor.update();
-    //     MQ7_Sensor.update();
-    //     calcR0_MQ135 += MQ135_Sensor.calibrate(3.6); /*ref : https://www.electronicoscaldas.com/datasheet/MQ-135_Hanwei.pdf*/
-    //     calcR0_MQ7 += MQ7_Sensor.calibrate(27.5); /*ref : https://www.sparkfun.com/datasheets/Sensors/Biometric/MQ-7.pdf*/
-    // }
-    // MQ135_Sensor.setR0(calcR0_MQ135/10);
-    // MQ7_Sensor.setR0(calcR0_MQ7/10);
-    // MQ135_Sensor.serialDebug(true);
-    // MQ7_Sensor.serialDebug(true);
-
-    // OLD_TIME = millis();
-    // while (millis() - OLD_TIME < TIME_PERIOD){
-    //     MQ7_Sensor.update();
-    //     MQ7_Sensor.readSensor();
-    //     Serial.println("#################################");
-    //     MQ7_Sensor.serialDebug();
-    //     Serial.println("#################################");
-    //     MQ135_Sensor.update();
-    //     MQ135_Sensor.readSensor();
-    //     Serial.println("#################################");
-    //     MQ135_Sensor.serialDebug();
-    //     Serial.println("#################################");
-
-    // }
-    // Screen_display.clear();
-    // Screen_display.drawString(0, 0, "Pre-heated & Calibration successful");
-    // Screen_display.display();
+  Serial.begin(9600);
+  setup_lora();
+  delivCount = 0;
+  sess_start = millis();
+  sendTimeoutStart = millis();
 }
-// ----------------------------------------------------------------------------------------------
 
-// Main Function --------------------------------------------------------------------------------
 void loop()
 {
-    // Serial.println("Sending to manager_mesh_server3");
-    // TEMPERATURE = DHT22_Sensor.readTemperature();
-    // snprintf(data, sizeof(data), "Hello world ! Count = %d", COUNT);
-    // // Send a message to a rf22_mesh_server
-    // // A route to the destination will be automatically discovered.
-    // if (Mesh_Manager.sendtoWait((uint8_t*)data, sizeof(data), GatewayAddress) == RH_ROUTER_ERROR_NONE){
-    //   // It has been reliably delivered to the next node.
-    //   // Now wait for a reply from the ultimate server
-    //   uint8_t len = sizeof(buf);
-    //   uint8_t from;
-    //   if (Mesh_Manager.recvfromAckTimeout(buf, &len, 3000, &from))
-    //   {
-    //     Serial.print("got reply from : 0x");
-    //     Serial.print(from, HEX);
-    //     Serial.print(": ");
-    //     Serial.println((char*)buf);
-    //   }
-    //   else
-    //   {
-    //     Serial.println("No reply, is rf22_mesh_server1, rf22_mesh_server2 and rf22_mesh_server3 running?");
-    //   }
-    //   COUNT++;
-    // }
-    // else
-    //    Serial.println("sendtoWait failed. Are the intermediate mesh servers running?");
+  int sendInterval = 2000;
+  int sendSimultCount = 1;
+  if ((millis() - sendTimeoutStart) > sendInterval)
+  {
+    sendTimeoutStart = millis();
+    sendMessage(message, nodeIdDestination, sendSimultCount);
+    delivCount++;
+    Serial.println((String)delivCount + "/200 sent");
+  }
 
-    /*MAIN*/
-    Mesh_Manager.printRoutingTable();
-    unsigned long CURRENTTIME = millis();
-    TEMPERATURE = ReadTemp();
-    Serial.println("Time : " + String(CURRENTTIME) + "msec");
-    Serial.println("TEMP : " + String(TEMPERATURE) + "C");
-    if (CURRENTTIME - OLDTIME > CYCLE_TIME)
-    {
-        SendDataToGateway(TEMPERATURE);
-        OLDTIME = CURRENTTIME; /*อัปเดตเวลา*/
-    }
-    else if (true)
-    {
-        SendDataToGateway(TEMPERATURE);
-    }
+  listen_lora(3000);
 
-    /*เช็คและส่งต่อข้อมูลจาก Node อื่นๆ*/
-    RecieveAndRoute();
-
-    // if (TEMPERATURE >= 27){
-    //     while(RF95_Sender.isChannelActive()){
-    //         Screen_display.clear();
-    //         Screen_display.drawString(0, 0, "Channel is Busy...");
-    //         Screen_display.display();
-    //         delay(500);
-    //     }
-
-    //     /*ส่งข้อมูลไปยัง Gateway*/
-    //     boolean SENDING = true;
-    //     while(SENDING){
-    //         if (Mesh_Manager.sendtoWait((uint8_t*)DATA, sizeof(DATA), NODE3_ADDRESS) == RH_ROUTER_ERROR_NONE){
-    //             Serial.println("Message sent to Gateway");
-    //             Screen_display.clear();
-    //             Screen_display.drawString(0, 0, "Sending Message to GW");
-    //             Screen_display.display();
-    //             delay(1000);
-    //             uint8_t PACKAGE_RCV_BUF_LEN = sizeof(PACKAGE_RCV_BUF);
-    //             uint8_t FROM;
-    //             if (Mesh_Manager.recvfromAckTimeout(PACKAGE_RCV_BUF, &PACKAGE_RCV_BUF_LEN, 10000, &FROM)){
-    //                 Serial.print("got reply from : 0x");
-    //                 Serial.print(FROM, HEX);
-    //                 Serial.print(": ");
-    //                 Serial.println((char*)PACKAGE_RCV_BUF);
-    //                 Screen_display.clear();
-    //                 Screen_display.drawString(0, 0, "got reply from : 0x" + String(FROM, HEX));
-    //                 Screen_display.drawString(0, 10, ": " + String((char*)PACKAGE_RCV_BUF));
-    //                 Screen_display.display();
-    //                 delay(1500);
-    //             } else {
-    //                 Serial.println("No reply, is rf22_mesh_server1, rf22_mesh_server2 and rf22_mesh_server3 running?");
-    //                 Screen_display.clear();
-    //                 Screen_display.drawString(0, 0, "No Reply");
-    //                 Screen_display.drawString(0, 10, "Trying Again...");
-    //                 delay(500);
-    //             }
-    //             SENDING = false;
-    //         }
-    //         else{
-    //             Serial.println("Message sending failed");
-    //             Screen_display.clear();
-    //             Screen_display.drawString(0, 0, "Message sending failed");
-    //             Screen_display.drawString(0, 10, "Resending.....");
-    //             Screen_display.display();
-    //             SENDING = true;
-    //             delay(500);
-    //         }
-    //     }
-
-    // } else {
-    //     Serial.println("Normal Temp");
-    //     Screen_display.clear();
-    //     Screen_display.drawString(0, 0, "Normal Temp");
-    //     Screen_display.display();
-    // }
-
-    // delay(1000);
+  if (delivCount >= 200)
+  {
+    int sess_end = millis();
+    int sess_time = sess_end - sess_start;
+    Serial.println("Total time: " + (String)sess_time);
+    while (1)
+      ;
+  }
 }

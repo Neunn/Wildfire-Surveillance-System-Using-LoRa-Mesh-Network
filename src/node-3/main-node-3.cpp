@@ -1,80 +1,112 @@
+/// ส่งได้ดีมาก
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <heltec.h>
+#include <RH_RF95.h>
+#include <RHMesh.h>
+#include <HT_SSD1306Wire.h>
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_Sensor.h>
-#include <HT_SSD1306Wire.h>
-#include <RH_RF95.h>
-#include <heltec.h>
+#include <DHT.h>
+#include <MQUnifiedsensor.h>
 
-// Define LoRa module pins
-#define RFM95_CS  18
-#define RFM95_RST 14
-#define RFM95_INT 26
-#define RF95_FREQ 923.2E6 
-#define TX_POWER 14    
+#define RF95_FREQ 923.2
 
+int nodeIdSelf = 4;
 
-RH_RF95 rf95(RFM95_CS, RFM95_INT);
-static SSD1306Wire Screen_display(0x3c, 500000, 4, 15, GEOMETRY_128_64, 16);
+// Singleton instance of the radio driver
+RH_RF95 driver(18, 26);
 
-void setup() {
-  Serial.begin(9600);
-  Heltec.begin(/*DisplayEnable Enable*/ false ,
-               /*Lora Disable*/ false, /*ต้องปิดเพราะไม่งั้นจะไม่ conflix กันกับ RH_RF95.h */
-               /*SerialEnable*/ true,
-               /*PABOOST*/ true,
-               /*BAND*/ 923.2E6);
+// Class to manage message delivery and receipt, using the driver declared above
+RHMesh *manager;
 
-  Screen_display.init();
-  Screen_display.displayOn();
-  Screen_display.clear(); 
+String messageResponse = "Alert Received!";
 
-  while (!Serial);
+int sess_start, sendTimeoutStart;
 
-  // Initialize LoRa module
-  pinMode(RFM95_RST, OUTPUT);
-  digitalWrite(RFM95_RST, HIGH);
+void setup_lora()
+{
 
-  // Manual reset
-  digitalWrite(RFM95_RST, LOW);
-  delay(10);
-  digitalWrite(RFM95_RST, HIGH);
-  delay(10);
+  manager = new RHMesh(driver, nodeIdSelf);
 
-  if (!rf95.init()) {
-    Serial.println("LoRa init failed");
-    while (1);
+  if (!manager->init())
+  {
+    Serial.println(F("init failed"));
   }
-  Serial.println("LoRa init succeeded");
-
-  // Set frequency
-  if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("Set frequency failed");
-    while (1);
+  else
+  {
+    Serial.println("Mesh Node \"" + (String)nodeIdSelf + "\" Up and Running!");
   }
-  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
 
-  // Optionally set additional parameters (e.g., bandwidth, coding rate)
+  driver.setTxPower(23, false);
+  driver.setCADTimeout(500);
+  driver.setFrequency(RF95_FREQ);
+  Serial.println("RF95 ready");
 }
 
-void loop() {
-  Screen_display.clear();
-  if (rf95.available()) {
-    // Buffer to hold received message
-    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-    uint8_t len = sizeof(buf);
+// ----------------------
+// ACTIONS
+// === LoRa
+uint8_t buf[RH_MESH_MAX_MESSAGE_LEN];
 
-    if (rf95.recv(buf, &len)) {
-      Serial.print("Received: ");
-      Serial.println((char*)buf);
-      Screen_display.drawString(0, 0, (char*)buf);
-      
-    } else {
-      Serial.println("Receive failed");
-      Screen_display.drawString(0, 0, "Receive failed");
+void listen_lora(int listenTimeout)
+{
+  uint8_t len = sizeof(buf);
+  uint8_t nodeIdFrom;
+
+  if (listenTimeout == 0)
+  {
+    // continuous listening mode
+    if (manager->recvfromAck(buf, &len, &nodeIdFrom))
+    {
+      Serial.print("Got Message nodeIdFrom ");
+      Serial.print(nodeIdFrom, HEX);
+      Serial.println(":");
+      Serial.println((char *)buf);
+
+      Serial.println("lastRssi = " + (String)driver.lastRssi());
+
+      // Send a reply back to the originator client
+      char messageResponseChar[messageResponse.length() + 1];
+      strcpy(messageResponseChar, messageResponse.c_str());
+      if (manager->sendtoWait((uint8_t *)messageResponseChar, sizeof(messageResponseChar), nodeIdFrom) != RH_ROUTER_ERROR_NONE)
+        Serial.println("sendtoWait failed");
     }
   }
-  Screen_display.display();
-  delay(2000);  
+  else
+  {
+    // timeout listening mode
+    if (manager->recvfromAckTimeout(buf, &len, listenTimeout, &nodeIdFrom))
+    {
+      Serial.print("Got Message nodeIdFrom ");
+      Serial.print(nodeIdFrom, HEX);
+      Serial.println(":");
+      Serial.println((char *)buf);
+
+      Serial.println("lastRssi = " + (String)driver.lastRssi());
+
+      // Send a reply back to the originator client
+      char messageResponseChar[messageResponse.length() + 1];
+      strcpy(messageResponseChar, messageResponse.c_str());
+      if (manager->sendtoWait((uint8_t *)messageResponseChar, sizeof(messageResponseChar), nodeIdFrom) != RH_ROUTER_ERROR_NONE)
+        Serial.println("sendtoWait failed");
+    }
+  }
+}
+
+// ----------------------
+// MAIN
+void setup()
+{
+  Serial.begin(9600);
+  setup_lora();
+  sess_start = millis();
+  sendTimeoutStart = millis();
+}
+
+void loop()
+{
+  listen_lora(3000);
 }
