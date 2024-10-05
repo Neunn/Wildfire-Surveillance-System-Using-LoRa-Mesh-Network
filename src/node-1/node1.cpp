@@ -242,6 +242,7 @@ void loop()
     Serial.println("CURRENTTIME = " + (String)CURRENTIME);
     Serial.println("(Before) OLDTIME = " + (String)OLDTIME);
     TEMPERATURE = readDHTTemperature();
+    Serial.println("Temperature = " + String(TEMPERATURE));
     /* เช็คหากครบสามชั่วโมงให้ส่งข้อมูลเลย */
     if ((CURRENTIME - OLDTIME >= INTERVAL) || (TEMPERATURE >= 26.0))
     {
