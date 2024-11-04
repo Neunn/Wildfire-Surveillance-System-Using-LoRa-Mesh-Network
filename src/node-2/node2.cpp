@@ -59,8 +59,8 @@ void SetUPLora()
     }
     // set ค่าความถี่ และ spreading factor
     RF95_Sender.setFrequency(923.2);
-    RF95_Sender.setCADTimeout(500);
-    // RF95_Sender.setSpreadingFactor(12);
+    // RF95_Sender.setCADTimeout(500);
+    RF95_Sender.setSpreadingFactor(12);
     RF95_Sender.setTxPower(23, false);
     Serial.println();
     Serial.println("Setup RF complete");
